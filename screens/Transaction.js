@@ -86,6 +86,82 @@ export default class TransactionScreen extends Component{
     });
   };
 
+  checkBookAvailability = async bookId => {
+    const bookRef = await db
+      .collection("books")
+      .where("book_id", "==", bookId)
+      .get();
+
+    var transactionType = "";
+    if (bookRef.docs.length == 0) {
+      transactionType = false;
+    } else {
+      bookRef.docs.map(doc => {
+        //if the book is available then transaction type will be issue
+        // otherwise it will be return
+        transactionType = doc.data().is_book_available ? "issue" : "return";
+      });
+    }
+
+    return transactionType;
+  };
+  
+  checkStudentEligibilityForBookIssue = async studentId => {
+    const studentRef = await db
+      .collection("students")
+      .where("student_id", "==", studentId)
+      .get();
+
+      var isStudentEligible = "";
+    if (studentRef.docs.length == 0) {
+      this.setState({
+        bookId: "",
+        studentId: ""
+      });
+      isStudentEligible = false;
+      Alert.alert("The student id doesn't exist in the database!");
+    } else {
+      studentRef.docs.map(doc => {
+        if (doc.data().number_of_books_issued < 2) {
+          isStudentEligible = true;
+        } else {
+          isStudentEligible = false;
+          Alert.alert("The student has already issued 2 books!");
+          this.setState({
+            bookId: "",
+            studentId: ""
+          });
+        }
+      });
+    }
+
+    return isStudentEligible;
+  };
+  
+  checkStudentEligibilityForBookReturn = async (bookId, studentId) => {
+    const transactionRef = await db
+      .collection("transactions")
+      .where("book_id", "==", bookId)
+      .limit(1)
+      .get();
+    var isStudentEligible = "";
+    transactionRef.docs.map(doc => {
+      var lastBookTransaction = doc.data();
+      if (lastBookTransaction.student_id === studentId) {
+        isStudentEligible = true;
+      } else {
+        isStudentEligible = false;
+        Alert.alert("The book wasn't issued by this student!");
+        this.setState({
+          bookId: "",
+          studentId: ""
+        });
+      }
+    });
+    return isStudentEligible;
+  };
+
+
   initiateBookIssue = async (bookId, studentId, bookName, studentName) => {
     //add a transaction
     db.collection("transactions").add({
@@ -151,34 +227,43 @@ export default class TransactionScreen extends Component{
     await this.getBookDetails(bookId);
     await this.getStudentDetails(studentId);
 
-    db.collection("books")
-      .doc(bookId)
-      .get()
-      .then(doc => {
-        var book = doc.data();
-        if (book.is_book_available) {
-          var { bookName, studentName } = this.state;
-          this.initiateBookIssue(bookId, studentId, bookName, studentName);
+    
+    var transactionType = await this.checkBookAvailability(bookId)
 
-         // For Android users only
-         ToastAndroid.show("Book issued to the student!", ToastAndroid.SHORT);
+    if (!transactionType) {
+      this.setState({ bookId: "", studentId: "" });
+      // For Android users only
+      // ToastAndroid.show("The book doesn't exist in the library database!", ToastAndroid.SHORT);
+      Alert.alert("The book doesn't exist in the library database!");
+    } else if (transactionType === "issue") {
+      var isEligible = await this.checkStudentEligibilityForBookIssue(
+        studentId
+      );
 
-         // Alert.alert("Book issued to the student!");
+      if (isEligible) {
+        var { bookName, studentName } = this.state;
+        this.initiateBookIssue(bookId, studentId, bookName, studentName);
+      }
+      // For Android users only
+      // ToastAndroid.show("Book issued to the student!", ToastAndroid.SHORT);
+      Alert.alert("Book issued to the student!");
+    } else {
+      var isEligible = await this.checkStudentEligibilityForBookReturn(
+        bookId,
+        studentId
+      );
 
-        } else {
-          var { bookName, studentName } = this.state;
-          this.initiateBookReturn(bookId, studentId, bookName, studentName);
-
-          // For Android users only
-          ToastAndroid.show(
-            "Book returned to the library!",
-            ToastAndroid.SHORT
-          );
-
-          // Alert.alert("Book returned to the library!");
-        }
-      });
+      if (isEligible) {
+        var { bookName, studentName } = this.state;
+        this.initiateBookReturn(bookId, studentId, bookName, studentName);
+      }
+      // For Android users only
+      // ToastAndroid.show("Book returned to the library!", ToastAndroid.SHORT);
+      Alert.alert("Book returned to the library!");
+    }
   };
+
+
     render(){
       const{bookId,studentId,domState,scanned}=this.state;
       if (domState !== "normal"){
